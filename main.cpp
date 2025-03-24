@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <vector>
+#include <sstream>
 
 // Windows includes
 #ifdef _WIN32
@@ -14,6 +15,7 @@ namespace fs = std::filesystem;
 
 // Forward declarations
 std::string getGitHubUsername();
+void parseFileSelection(const std::string& selection, const std::vector<std::string>& availableFiles, std::vector<std::string>& selectedFiles);
 
 // Function to execute commands in terminal
 std::string executeCommand(const std::string& command) {
@@ -359,13 +361,17 @@ void createProject() {
     std::cout << "Project successfully created and uploaded to GitHub!" << std::endl;
 }
 
-// Function to update an existing project
-void updateProject() {
-    std::string localPath, commitMessage;
-    char selectFilesChar;
-    bool selectFiles;
+// Enhanced function to update an existing project
+void enhancedUpdateProject() {
+    std::string localPath, commitMessage, repoName;
+    char selectOption;
+    int updateOption;
     
-    std::cout << "=== Update Existing Project ===" << std::endl;
+    std::cout << "=== Enhanced Project Update ===" << std::endl;
+    
+    // Ask for repository name
+    std::cout << "Enter repository name: ";
+    std::getline(std::cin, repoName);
     
     // Ask for local project path
     std::cout << "Enter local project directory path: ";
@@ -386,102 +392,256 @@ void updateProject() {
         return;
     }
     
-    // Ask if user wants to select specific files
-    std::cout << "Do you want to select specific files to update? (y/n): ";
-    std::cin >> selectFilesChar;
-    std::cin.ignore();
+    // Show current status
+    std::string status = executeCommand("git status -s");
+    std::cout << "\nCurrent git status:" << std::endl;
+    std::cout << status << std::endl;
     
-    selectFiles = (selectFilesChar == 'y' || selectFilesChar == 'Y');
+    // Ask what user wants to do
+    std::cout << "\nWhat would you like to do?" << std::endl;
+    std::cout << "1. Add new files only" << std::endl;
+    std::cout << "2. Update existing files only" << std::endl;
+    std::cout << "3. Add new files and update existing files" << std::endl;
+    std::cout << "Your choice: ";
+    std::cin >> updateOption;
+    std::cin.ignore(); // Clear buffer
     
-    // Add files to repository
-    std::cout << "Enter commit message (leave empty for auto-commit): ";
-    std::getline(std::cin, commitMessage);
-    
-    if (commitMessage.empty()) {
-        commitMessage = "Project update";
-    }
-    
-    bool commitSuccess = false;
-    
-    if (selectFiles) {
-        // Show status to help user understand what files have changed
-        std::string status = executeCommand("git status -s");
-        std::cout << "Current git status:" << std::endl;
-        std::cout << status << std::endl;
-        
-        // List all files in the directory
-        std::vector<std::string> allFiles = listFiles(localPath);
-        if (allFiles.empty()) {
-            std::cout << "No files found in directory." << std::endl;
-            return;
-        }
-        
-        // Let user select files
-        std::vector<std::string> selectedFiles;
-        std::cout << "Available files:" << std::endl;
-        for (size_t i = 0; i < allFiles.size(); ++i) {
-            std::cout << i + 1 << ". " << allFiles[i] << std::endl;
-        }
-        
-        std::cout << "Enter file numbers to add (comma-separated, e.g., 1,3,5), or 'all' to select all: ";
-        std::string selection;
-        std::getline(std::cin, selection);
-        
-        if (selection == "all") {
-            selectedFiles = allFiles;
-        } else {
-            // Parse comma-separated list
-            std::string number;
-            for (char c : selection) {
-                if (c == ',') {
-                    if (!number.empty()) {
-                        int index = std::stoi(number) - 1;
-                        if (index >= 0 && index < static_cast<int>(allFiles.size())) {
-                            selectedFiles.push_back(allFiles[index]);
-                        }
-                        number.clear();
-                    }
-                } else if (isdigit(c)) {
-                    number += c;
-                }
-            }
-            
-            // Handle the last number
-            if (!number.empty()) {
-                int index = std::stoi(number) - 1;
-                if (index >= 0 && index < static_cast<int>(allFiles.size())) {
-                    selectedFiles.push_back(allFiles[index]);
-                }
-            }
-        }
-        
-        if (selectedFiles.empty()) {
-            std::cout << "No files selected. Update canceled." << std::endl;
-            return;
-        }
-        
-        std::cout << "Selected files:" << std::endl;
-        for (const auto& file : selectedFiles) {
-            std::cout << "- " << file << std::endl;
-        }
-        
-        commitSuccess = addSelectedFilesAndCommit(selectedFiles, commitMessage);
-    } else {
-        commitSuccess = addFilesAndCommit(commitMessage);
-    }
-    
-    if (!commitSuccess) {
-        std::cout << "Error creating commit." << std::endl;
+    // List all files in the directory
+    std::vector<std::string> allFiles = listFiles(localPath);
+    if (allFiles.empty()) {
+        std::cout << "No files found in directory." << std::endl;
         return;
     }
     
-    // Push changes to remote repository
+    // Check for untracked (new) files
+    std::string untrackedFiles = executeCommand("git ls-files --others --exclude-standard");
+    std::vector<std::string> newFiles;
+    std::string currentFile;
+    std::istringstream untrackedStream(untrackedFiles);
+    while(std::getline(untrackedStream, currentFile)) {
+        if (!currentFile.empty()) {
+            // Remove trailing newlines/whitespace
+            if (currentFile.back() == '\n' || currentFile.back() == '\r')
+                currentFile.pop_back();
+            newFiles.push_back(currentFile);
+        }
+    }
+    
+    // Check for modified files
+    std::string modifiedFiles = executeCommand("git ls-files --modified");
+    std::vector<std::string> changedFiles;
+    std::istringstream modifiedStream(modifiedFiles);
+    while(std::getline(modifiedStream, currentFile)) {
+        if (!currentFile.empty()) {
+            // Remove trailing newlines/whitespace
+            if (currentFile.back() == '\n' || currentFile.back() == '\r')
+                currentFile.pop_back();
+            changedFiles.push_back(currentFile);
+        }
+    }
+    
+    std::vector<std::string> selectedFiles;
+    
+    // Process based on user choice
+    switch(updateOption) {
+        case 1: // Add new files only
+            if (newFiles.empty()) {
+                std::cout << "No new files found to add." << std::endl;
+                return;
+            }
+            
+            std::cout << "\nNew files available:" << std::endl;
+            for (size_t i = 0; i < newFiles.size(); ++i) {
+                std::cout << i + 1 << ". " << newFiles[i] << std::endl;
+            }
+            
+            // Ask if user wants to select specific files
+            std::cout << "Do you want to select specific files? (y/n): ";
+            std::cin >> selectOption;
+            std::cin.ignore();
+            
+            if (selectOption == 'y' || selectOption == 'Y') {
+                std::cout << "Enter file numbers to add (comma-separated, e.g., 1,3,5), or 'all' to select all: ";
+                std::string selection;
+                std::getline(std::cin, selection);
+                
+                if (selection == "all") {
+                    selectedFiles = newFiles;
+                } else {
+                    // Parse selection
+                    parseFileSelection(selection, newFiles, selectedFiles);
+                }
+            } else {
+                selectedFiles = newFiles;
+            }
+            break;
+            
+        case 2: // Update existing files only
+            if (changedFiles.empty()) {
+                std::cout << "No modified files found to update." << std::endl;
+                return;
+            }
+            
+            std::cout << "\nModified files available:" << std::endl;
+            for (size_t i = 0; i < changedFiles.size(); ++i) {
+                std::cout << i + 1 << ". " << changedFiles[i] << std::endl;
+            }
+            
+            // Ask if user wants to select specific files
+            std::cout << "Do you want to select specific files? (y/n): ";
+            std::cin >> selectOption;
+            std::cin.ignore();
+            
+            if (selectOption == 'y' || selectOption == 'Y') {
+                std::cout << "Enter file numbers to update (comma-separated, e.g., 1,3,5), or 'all' to select all: ";
+                std::string selection;
+                std::getline(std::cin, selection);
+                
+                if (selection == "all") {
+                    selectedFiles = changedFiles;
+                } else {
+                    // Parse selection
+                    parseFileSelection(selection, changedFiles, selectedFiles);
+                }
+            } else {
+                selectedFiles = changedFiles;
+            }
+            break;
+            
+        case 3: // Add new files and update existing
+            {
+                // Combine new and modified files
+                std::vector<std::string> combinedFiles;
+                combinedFiles.insert(combinedFiles.end(), newFiles.begin(), newFiles.end());
+                combinedFiles.insert(combinedFiles.end(), changedFiles.begin(), changedFiles.end());
+                
+                if (combinedFiles.empty()) {
+                    std::cout << "No files found to add or update." << std::endl;
+                    return;
+                }
+                
+                std::cout << "\nAvailable files to add/update:" << std::endl;
+                for (size_t i = 0; i < combinedFiles.size(); ++i) {
+                    std::string prefix = "";
+                    if (std::find(newFiles.begin(), newFiles.end(), combinedFiles[i]) != newFiles.end()) {
+                        prefix = "[NEW] ";
+                    } else {
+                        prefix = "[MOD] ";
+                    }
+                    std::cout << i + 1 << ". " << prefix << combinedFiles[i] << std::endl;
+                }
+                
+                // Ask if user wants to select specific files
+                std::cout << "Do you want to select specific files? (y/n): ";
+                std::cin >> selectOption;
+                std::cin.ignore();
+                
+                if (selectOption == 'y' || selectOption == 'Y') {
+                    std::cout << "Enter file numbers to process (comma-separated, e.g., 1,3,5), or 'all' to select all: ";
+                    std::string selection;
+                    std::getline(std::cin, selection);
+                    
+                    if (selection == "all") {
+                        selectedFiles = combinedFiles;
+                    } else {
+                        // Parse selection
+                        parseFileSelection(selection, combinedFiles, selectedFiles);
+                    }
+                } else {
+                    selectedFiles = combinedFiles;
+                }
+            }
+            break;
+            
+        default:
+            std::cout << "Invalid option. Exiting." << std::endl;
+            return;
+    }
+    
+    // If no files selected
+    if (selectedFiles.empty()) {
+        std::cout << "No files selected. Update canceled." << std::endl;
+        return;
+    }
+    
+    // Show selected files
+    std::cout << "\nSelected files for processing:" << std::endl;
+    for (const auto& file : selectedFiles) {
+        std::cout << "- " << file << std::endl;
+    }
+    
+    // Get commit message
+    std::cout << "\nEnter commit message (leave empty for auto-commit): ";
+    std::getline(std::cin, commitMessage);
+    
+    if (commitMessage.empty()) {
+        commitMessage = "Update for " + repoName;
+    }
+    
+    // First reset staging area
+    executeCommand("git reset");
+    
+    // Add selected files
+    bool commitSuccess = true;
+    for (const auto& file : selectedFiles) {
+        std::cout << "Adding file: " << file << std::endl;
+        std::string addOutput = executeCommand("git add \"" + file + "\"");
+        if (addOutput.find("error") != std::string::npos) {
+            std::cout << "Error adding file: " << file << std::endl;
+            commitSuccess = false;
+        }
+    }
+    
+    if (!commitSuccess) {
+        std::cout << "Errors occurred while adding files. Proceeding with commit anyway..." << std::endl;
+    }
+    
+    // Create commit
+    std::string commitOutput = executeCommand("git commit -m \"" + commitMessage + "\"");
+    commitSuccess = (commitOutput.find("file changed") != std::string::npos || 
+                      commitOutput.find("files changed") != std::string::npos);
+    
+    if (!commitSuccess) {
+        std::cout << "Error creating commit: " << commitOutput << std::endl;
+        return;
+    }
+    
+    std::cout << commitOutput << std::endl;
+    
+    // Push changes
+    std::cout << "Pushing changes to GitHub..." << std::endl;
     if (!pushChanges()) {
         std::cout << "Error pushing changes to remote repository." << std::endl;
         return;
     }
     
     std::cout << "Project successfully updated and changes uploaded to GitHub!" << std::endl;
+}
+
+// Helper function to parse file selection
+void parseFileSelection(const std::string& selection, const std::vector<std::string>& availableFiles, std::vector<std::string>& selectedFiles) {
+    std::string number;
+    for (char c : selection) {
+        if (c == ',') {
+            if (!number.empty()) {
+                int index = std::stoi(number) - 1;
+                if (index >= 0 && index < static_cast<int>(availableFiles.size())) {
+                    selectedFiles.push_back(availableFiles[index]);
+                }
+                number.clear();
+            }
+        } else if (isdigit(c)) {
+            number += c;
+        }
+    }
+    
+    // Handle the last number
+    if (!number.empty()) {
+        int index = std::stoi(number) - 1;
+        if (index >= 0 && index < static_cast<int>(availableFiles.size())) {
+            selectedFiles.push_back(availableFiles[index]);
+        }
+    }
 }
 
 // Get GitHub username
@@ -556,7 +716,7 @@ int main() {
                         continue;
                     }
                 }
-                updateProject();
+                enhancedUpdateProject();
                 break;
             case 3:
                 showAuthStatus();
